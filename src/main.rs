@@ -5,7 +5,6 @@ use oxc::{
         AstKind, Visit,
     },
     parser::Parser,
-    semantic::SemanticBuilder,
     span::SourceType,
 };
 use serde::{Deserialize, Serialize};
@@ -38,7 +37,6 @@ struct QuesoFunction {
 #[allow(unused)]
 impl Queso {
     fn print(&self, input: &str) {
-        // println!("{:?}", self.functions);
         println!(
             "[{}] {}() {}",
             self.scope,
@@ -99,14 +97,13 @@ impl<'a> Visit<'a> for Queso {
         match &kind {
             AstKind::VariableDeclarator(decl) => {
                 self.is_variable = false;
-                // println!("[{}] Enter: {:#?}", self.scope, decl.id);
             }
             AstKind::Function(function) => {
                 let source_text = self.source_text.as_str();
                 let start: usize = function.params.span.start as usize;
                 let end: usize = function.params.span.end as usize;
                 let sub = &source_text[start..end];
-                println!("{:#?}", sub);
+
                 if let Some(name) = &function.id {
                     let function_name = self.functions.pop().unwrap_or("".to_owned());
                     let mut value = self.functions_data[&function_name].to_string();
@@ -166,32 +163,6 @@ impl<'a> Visit<'a> for Queso {
 
 fn main() {
     custom_oxc();
-    // evaluate_oxc();
-}
-
-#[allow(unused)]
-fn evaluate_oxc() {
-    let source_text = std::fs::read_to_string("./test.js").unwrap();
-    let allocator = Allocator::default();
-    let source_type = SourceType::from_path("index.js").unwrap();
-    let ret = Parser::new(&allocator, source_text.as_str(), source_type).parse();
-
-    let program = allocator.alloc(ret.program);
-    let semantic_ret = SemanticBuilder::new(source_text.as_str(), source_type)
-        .with_trivias(&ret.trivias)
-        .build(program);
-    let semantic = semantic_ret.semantic;
-    println!("{:#?}", &semantic.scopes());
-    println!("{:#?}", &semantic.module_record());
-    println!("{:#?}", &semantic.symbols());
-
-    // for node in semantic.nodes().iter() {
-    //     // node.traverse();
-    //     // if let AstKind::Function(func) = &node.kind() {
-    //     //     let jsdoc = semantic.jsdoc().get_by_node(node);
-    //     //     println!("{:#?}", jsdoc);
-    //     // }
-    // }
 }
 
 fn custom_oxc() {
@@ -201,7 +172,7 @@ fn custom_oxc() {
         .write(true)
         .create(true)
         .truncate(true)
-        .open(r#"out.file"#)
+        .open(r#"out.json"#)
         .unwrap();
 
     let allocator = Allocator::default();
@@ -210,21 +181,7 @@ fn custom_oxc() {
 
     let program = allocator.alloc(ret.program);
     let mut queso = Queso::new(source_text.clone(), writer);
+
     queso.visit_program(program);
     queso.writer.flush().unwrap();
-    // let semantic_ret = SemanticBuilder::new(source_text, source_type)
-    //     .with_trivias(&ret.trivias)
-    //     .build(program);
-    // let semantic = semantic_ret.semantic;
-    // println!("{:#?}", &semantic.scopes());
-    // println!("{:#?}", &semantic.module_record());
-    // println!("{:#?}", &semantic.symbols());
-
-    // for node in semantic.nodes().iter() {
-    //     // node.traverse();
-    //     // if let AstKind::Function(func) = &node.kind() {
-    //     //     let jsdoc = semantic.jsdoc().get_by_node(node);
-    //     //     println!("{:#?}", jsdoc);
-    //     // }
-    // }
 }
