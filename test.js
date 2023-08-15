@@ -1,16 +1,27 @@
-function giveMeThat(input) {
-  console.log(input.id);
-  console.log(input.items, input["id"]);
+// variables
+// - data
+// - input
 
-  function helloWorld({ id }) {
-    console.log(id.value);
-  }
-  {
-    const scope = 1;
-  }
+// types
+// - data: {
+//   id: any,
+//   items: Array<{ id: any }>
+// }
+// - input: any
+function giveMeThat(data, config) {
+  console.log(data.id);
+  console.log(data.items, data["id"]);
+  const input = data.items[0].id;
+
+  call(input); // should give an error
 }
 
-function testFunction({ id }, { user: { token } }) {
+// variables
+// - id
+
+// types
+// - id: any
+function call({ id }, { config }) {
   console.log(id);
 }
 
@@ -20,8 +31,4 @@ const data = {
 };
 
 giveMeThat(data);
-testFunction(data);
 
-{
-  const scope2 = 2;
-}
