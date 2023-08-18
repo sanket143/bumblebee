@@ -1,16 +1,22 @@
 use oxc::ast::ast::{BindingPattern, BindingPatternKind, ObjectPattern, PropertyKey};
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
+use serde_json::Value;
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Default)]
 pub struct Variable {
     pub name: String,
     pub is_phantom: bool,
+    /// leaf properties which are in scope of the function
+    pub exposed_properties: Vec<String>,
 }
 
 impl Variable {
     pub fn new(name: String, is_phantom: bool) -> Self {
-        Self { name, is_phantom }
+        Self {
+            name,
+            is_phantom,
+            ..Default::default()
+        }
     }
 }
 
@@ -27,7 +33,10 @@ impl<'a> Serializer<Variable> for BindingPattern<'a> {
                 Some(Variable::new(pattern.name.to_string(), false))
             }
             // BindingPatternKind::ObjectPattern(pattern) => pattern.serialize(),
-            // BindingPatternKind::ArrayPattern(pattern) => None,
+            BindingPatternKind::ArrayPattern(pattern) => {
+                println!("ArrayPattern: {:#?}", pattern);
+                Some(Variable::new("param".to_owned(), true))
+            }
             // BindingPatternKind::AssignmentPattern(pattern) => None,
             _ => Some(Variable::new("param".to_owned(), true)),
         }

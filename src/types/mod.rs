@@ -1,4 +1,5 @@
 pub mod object;
+pub use object::Serializer;
 use oxc::{
     ast::{
         ast::{CallExpression, Declaration, Expression, Function, Statement},
