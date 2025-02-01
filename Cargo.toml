@@ -11,6 +11,7 @@ oxc_parser = { version = "0.48" }
 oxc_semantic = { version = "0.48" }
 oxc_span = { version = "0.48" }
 oxc_traverse = { version = "0.48" }
+tokio = { version = "1.43", features = ["macros", "rt-multi-thread"] }
 anyhow = "1.0"
 serde = "1.0"
 serde_json = "1.0"

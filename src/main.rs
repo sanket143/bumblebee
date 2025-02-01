@@ -9,7 +9,16 @@ use std::ffi::OsStr;
 use std::path::Path;
 use walkdir::WalkDir;
 
-struct File;
+#[derive(Default, Clone)]
+struct File {
+    filepath: String,
+}
+
+impl File {
+    pub fn new(filepath: String) -> Self {
+        Self { filepath }
+    }
+}
 
 impl<'a> Traverse<'a> for File {
     fn enter_arrow_function_expression(
@@ -25,7 +34,8 @@ struct Block {
     //?
 }
 
-fn main() -> Result<()> {
+#[tokio::main]
+async fn main() -> Result<()> {
     for entry in WalkDir::new("./test-dir").into_iter().flatten() {
         if entry.path().extension() == Some(OsStr::new("js")) {
             println!("{}", entry.path().display());
@@ -33,7 +43,6 @@ fn main() -> Result<()> {
             let source_text = std::fs::read_to_string(entry.path())?;
             let allocator = Allocator::default();
             let source_type = SourceType::from_path(source_path)?;
-            let mut file = File {};
 
             let mut errors = Vec::new();
             let ParserReturn {
@@ -42,6 +51,7 @@ fn main() -> Result<()> {
                 panicked,
                 ..
             } = Parser::new(&allocator, source_text.as_str(), source_type).parse();
+            let mut file = File::new(source_path.to_str().unwrap().to_owned());
 
             errors.extend(parsing_errors);
 

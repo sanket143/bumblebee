@@ -5,7 +5,7 @@ const functionFactory = {
     call();
   },
   testFunction: () => {
-    return new Promise((resolve) => {
+    return new Promise((resolve, reject) => {
       call();
       resolve("1");
     });

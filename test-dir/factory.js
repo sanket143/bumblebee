@@ -1,9 +1,9 @@
 const factory = {
-  test: () => {
-    console.log("test");
+  test: (data) => {
+    console.log(data.id);
   },
 };
 
 export const call = () => {
-  factory.test();
+  factory.test({ id: 1 });
 };
