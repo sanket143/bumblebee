@@ -1,5 +1,5 @@
-all:
-	cargo run && echo && echo "############### out.json content ###############" && echo && cat out.json
+run:
+	cargo run
 
-test:
-	cargo test -- --nocapture
+js:
+	node test-dir/index.js

@@ -1,14 +1,35 @@
-function giveMeThat(data, config) {
-  console.log(data.id);
-  console.log(data.items, data["id"]);
-  const input = data.items[0].id;
+import { call } from "./factory.js";
 
-  call(input);
-}
+const functionFactory = {
+  mainFunction: () => {
+    call();
+  },
+  testFunction: () => {
+    return new Promise((resolve) => {
+      call();
+      resolve("1");
+    });
+  },
+};
 
-function call({ token }, { config }, ...args) {
-  console.log(toast);
-}
+const main = () => {
+  call();
 
-giveMeThat(data);
+  Object.values(functionFactory).forEach((fn) => {
+    console.log(fn());
+  });
+};
 
+(() => {
+  // what will be this function
+  call();
+})();
+
+main();
+/**
+ * References of call()?
+ * - functionFactory.mainFunction();
+ * - functionFactory.testFunction();
+ * - <anon>
+ * - main();
+ */
