@@ -35,11 +35,8 @@ fn debug_ast_node(node: &AstNode, semantic: &Semantic) {
 
 fn debug_reference(reference: &Reference, semantic: &Semantic) {
     let id = reference.symbol_id().unwrap();
-    let nodes = semantic.nodes();
     let references = semantic.symbol_references(id);
-    let declaration = semantic.symbol_declaration(id);
 
-    debug_ast_node(nodes.get_node(declaration.id()), semantic);
     debug_ast_node(semantic.nodes().get_node(reference.node_id()), semantic);
 
     for refer in references {
@@ -99,12 +96,12 @@ async fn main() -> Result<()> {
                     let references = semantic.symbol_references(id);
                     let declaration = semantic.symbol_declaration(id);
 
+                    print!("DECLARATION:");
+                    debug_ast_node(declaration, &semantic);
+
                     for reference in references {
                         debug_reference(reference, &semantic);
                     }
-
-                    print!("TEST:");
-                    debug_ast_node(declaration, &semantic);
                 }
             }
         }
