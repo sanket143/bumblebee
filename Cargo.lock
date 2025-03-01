@@ -456,24 +456,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "oxc_traverse"
-version = "0.48.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "acab4f6ce38ab1659ec8bc40aada41f7bfc98477d1fc3529573cb7ccacfa3144"
-dependencies = [
- "compact_str",
- "itoa",
- "oxc_allocator",
- "oxc_ast",
- "oxc_data_structures",
- "oxc_ecmascript",
- "oxc_semantic",
- "oxc_span",
- "oxc_syntax",
- "rustc-hash",
-]
-
-[[package]]
 name = "petgraph"
 version = "0.7.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -550,7 +532,6 @@ dependencies = [
  "oxc_parser",
  "oxc_semantic",
  "oxc_span",
- "oxc_traverse",
  "serde",
  "serde_json",
  "tokio",

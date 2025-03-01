@@ -25,6 +25,8 @@ const main = () => {
   call();
 })();
 
+const unrelatedScope = () => {};
+
 main();
 /**
  * References of call()?

@@ -1,37 +1,52 @@
 use anyhow::Result;
 use oxc_allocator::Allocator;
-use oxc_ast::ast::Function;
+use oxc_ast::AstKind;
 use oxc_parser::{Parser, ParserReturn};
-use oxc_semantic::{SemanticBuilder, SemanticBuilderReturn};
-use oxc_span::SourceType;
-use oxc_traverse::{traverse_mut, Traverse};
+use oxc_semantic::{AstNode, Reference, Semantic, SemanticBuilder, SemanticBuilderReturn};
+use oxc_span::{GetSpan, SourceType};
 use std::ffi::OsStr;
-use std::path::Path;
 use walkdir::WalkDir;
 
-#[derive(Default, Clone)]
-struct File {
-    filepath: String,
-}
+fn debug_ast_node(node: &AstNode, semantic: &Semantic) {
+    let nodes = semantic.nodes();
+    let mut answer = None;
 
-impl File {
-    pub fn new(filepath: String) -> Self {
-        Self { filepath }
+    for ancestor in nodes.ancestors(node.id()) {
+        match ancestor.kind() {
+            AstKind::Program(_) => {}
+            _ => {
+                answer = Some(ancestor);
+            }
+        }
+    }
+
+    if let Some(answer) = answer {
+        let span = answer.span();
+        println!(
+            "[DBG_AST_NODE] {:?} {}",
+            answer.scope_id(),
+            semantic
+                .source_text()
+                .get((span.start as usize)..(span.end as usize))
+                .unwrap()
+        );
     }
 }
 
-impl<'a> Traverse<'a> for File {
-    fn enter_arrow_function_expression(
-        &mut self,
-        node: &mut oxc_ast::ast::ArrowFunctionExpression<'a>,
-        ctx: &mut oxc_traverse::TraverseCtx<'a>,
-    ) {
-        println!("{:#?}", &node);
-    }
-}
+fn debug_reference(reference: &Reference, semantic: &Semantic) {
+    let id = reference.symbol_id().unwrap();
+    let nodes = semantic.nodes();
+    let references = semantic.symbol_references(id);
+    let declaration = semantic.symbol_declaration(id);
 
-struct Block {
-    //?
+    debug_ast_node(nodes.get_node(declaration.id()), semantic);
+    debug_ast_node(semantic.nodes().get_node(reference.node_id()), semantic);
+
+    for refer in references {
+        if refer.symbol_id() != reference.symbol_id() {
+            debug_reference(refer, semantic);
+        }
+    }
 }
 
 #[tokio::main]
@@ -46,12 +61,11 @@ async fn main() -> Result<()> {
 
             let mut errors = Vec::new();
             let ParserReturn {
-                mut program,
+                program,
                 errors: parsing_errors,
                 panicked,
                 ..
             } = Parser::new(&allocator, source_text.as_str(), source_type).parse();
-            let mut file = File::new(source_path.to_str().unwrap().to_owned());
 
             errors.extend(parsing_errors);
 
@@ -70,9 +84,7 @@ async fn main() -> Result<()> {
 
             errors.extend(semantic_errors);
 
-            if errors.is_empty() {
-                println!("parsing and semantic analysis completed successfully.");
-            } else {
+            if !errors.is_empty() {
                 for error in errors {
                     eprintln!("{error:?}");
                 }
@@ -80,22 +92,21 @@ async fn main() -> Result<()> {
                 panic!("Failed to build Semantic for Counter component.");
             }
 
-            // println!("{:#?}", program);
+            let symbol_table = semantic.symbols();
 
-            let (symbol_table, scope_tree) = semantic.into_symbol_table_and_scope_tree();
+            for id in symbol_table.symbol_ids() {
+                if symbol_table.get_name(id) == "call" {
+                    let references = semantic.symbol_references(id);
+                    let declaration = semantic.symbol_declaration(id);
 
-            traverse_mut(
-                &mut file,
-                &allocator,
-                &mut program,
-                symbol_table,
-                scope_tree,
-            );
-            // we need to process each file
-            // keep track of function call references
-            // - in other functions
-            // - other object functions
-            // - callbacks?
+                    for reference in references {
+                        debug_reference(reference, &semantic);
+                    }
+
+                    print!("TEST:");
+                    debug_ast_node(declaration, &semantic);
+                }
+            }
         }
     }
 
