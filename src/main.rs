@@ -8,9 +8,10 @@ use oxc_parser::{Parser, ParserReturn};
 use oxc_resolver::{ResolveOptions, Resolver};
 use oxc_semantic::{AstNode, Reference, Semantic, SemanticBuilder, SemanticBuilderReturn};
 use oxc_span::{Atom, GetSpan, SourceType};
-use std::{ffi::OsStr, path::PathBuf};
+use std::{error::Error, ffi::OsStr, fmt, path::PathBuf};
 use walkdir::WalkDir;
 
+#[derive(Debug)]
 struct Query {
     symbol: String,       // e.g. call() symbol
     symbol_path: PathBuf, // from ./factory.js file
@@ -39,26 +40,58 @@ impl<'a> Service<'a> {
 
     pub fn find_references(&self, query: &Query) {
         let symbol_table = self.semantic.symbols();
+        let query_source_path =
+            resolve_import_path(&self.root_path, query.symbol_path.to_str().unwrap()).unwrap();
+
+        // TODO: clean this path up
+        let symbol_source_path = resolve_import_path(
+            &self.root_path.join(".."),
+            self.source_path.to_str().unwrap(),
+        )
+        .unwrap();
+
+        println!("Finding references in: {}", self.source_path.display());
         // first look for the reference
 
         for id in symbol_table.symbol_ids() {
-            // println!("{:?}, {}", id, symbol_table.get_name(id));
             if symbol_table.get_name(id) == query.symbol {
-                let references = self.semantic.symbol_references(id);
                 let declaration = self.semantic.symbol_declaration(id);
 
-                // Check if the declaration is an import or require statement
-                // If it is then we need to check the source path
-                // If that's the same as the query or not
-                //
-                // How do I know if the declaration is an import?
-                check_import(declaration, &self.semantic);
+                if query_source_path == symbol_source_path {
+                    // can we store all of these as symbolIds? and dump the declaration of all of these
+                    // in the file in the end?
+                    // it'll also be easier to maintain the unique symbolIds that way.
+                    //
+                    // One more check in declaration, if it's not an import but a declaration
+                    // then check if the declaration file and query symbol file path is same
+                    // How do I know what's the file of the declaration? source_path? I guess
+                    debug_ast_node(declaration, &self.semantic);
+                } else {
+                    // Check if the declaration is an import or require statement
+                    // If it is then we need to check the source path
+                    // If that's the same as the query or not
+                    //
+                    // How do I know if the declaration is an import?
+                    let import_path = check_import(&self.root_path, declaration, &self.semantic);
 
-                // can we store all of these as symbolIds? and dump the declaration of all of these
-                // in the file in the end?
-                // it'll also be easier to maintain the unique symbolIds that way.
-                debug_ast_node(declaration, &self.semantic);
+                    if let Some(import_path) = import_path {
+                        let import_path = self.root_path.join(import_path);
+                        let query_source_path = resolve_import_path(
+                            &self.root_path,
+                            query.symbol_path.to_str().unwrap(),
+                        )
+                        .unwrap();
 
+                        // there could be symbols with same name in multiple files
+                        // verify if the query symbol is of same imported from same file as
+                        // mentioned in the query
+                        if import_path != query_source_path {
+                            continue;
+                        }
+                    }
+                }
+
+                let references = self.semantic.symbol_references(id);
                 for reference in references {
                     debug_reference(reference, &self.semantic);
                 }
@@ -67,9 +100,7 @@ impl<'a> Service<'a> {
     }
 }
 
-fn resolve_import_path(specifier: &str) {
-    println!("IMPORT:{}", specifier);
-
+fn resolve_import_path(root_path: &PathBuf, specifier: &str) -> Result<PathBuf> {
     let options = ResolveOptions {
         extensions: vec![".js".into()],
         extension_alias: vec![(".js".into(), vec![".ts".into(), ".js".into()])],
@@ -77,13 +108,11 @@ fn resolve_import_path(specifier: &str) {
         ..ResolveOptions::default()
     };
 
-    match Resolver::new(options).resolve(
-        "/home/snket143/Remote/personal/bumblebee/test-dir",
-        specifier,
-    ) {
-        Err(error) => println!("Error: {error}"),
-        Ok(resolution) => println!("Resolved: {:?}", resolution.full_path()),
-    }
+    let full_path = Resolver::new(options)
+        .resolve(root_path, specifier)?
+        .full_path();
+
+    Ok(full_path)
 }
 
 fn check_require<'a>(node: &'a AstNode, semantic: &'a Semantic) -> Option<Atom<'a>> {
@@ -114,7 +143,7 @@ fn check_require<'a>(node: &'a AstNode, semantic: &'a Semantic) -> Option<Atom<'
     specifier
 }
 
-fn check_import(node: &AstNode, semantic: &Semantic) -> bool {
+fn check_import(root_path: &PathBuf, node: &AstNode, semantic: &Semantic) -> Option<PathBuf> {
     let nodes = semantic.nodes();
     let mut import_node = None;
 
@@ -143,11 +172,10 @@ fn check_import(node: &AstNode, semantic: &Semantic) -> bool {
     // and so there will never be the case when we reach require or import where
     // that symbol was not referred
     if let Some(specifier) = import_node {
-        resolve_import_path(specifier.into());
-        return true;
+        return Some(resolve_import_path(root_path, specifier.into()).unwrap());
     }
 
-    false
+    None
 }
 
 fn debug_ast_node(node: &AstNode, semantic: &Semantic) {
@@ -166,8 +194,7 @@ fn debug_ast_node(node: &AstNode, semantic: &Semantic) {
     if let Some(answer) = answer {
         let span = answer.span();
         println!(
-            "[DBG_AST_NODE] {:?} {}",
-            answer.scope_id(),
+            "[DBG_AST_NODE] {}",
             semantic
                 .source_text()
                 .get((span.start as usize)..(span.end as usize))

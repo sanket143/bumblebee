@@ -1,6 +1,5 @@
 // test imports manually
 import { call } from "./factory.js";
-const { a } = require("./utils.js");
 
 const functionFactory = {
   mainFunction: () => {
