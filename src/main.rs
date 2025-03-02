@@ -1,11 +1,88 @@
 use anyhow::Result;
 use oxc_allocator::Allocator;
-use oxc_ast::AstKind;
+use oxc_ast::{
+    ast::{Argument, CallExpression, Expression, StringLiteral},
+    AstKind,
+};
 use oxc_parser::{Parser, ParserReturn};
+use oxc_resolver::{ResolveOptions, Resolver};
 use oxc_semantic::{AstNode, Reference, Semantic, SemanticBuilder, SemanticBuilderReturn};
 use oxc_span::{GetSpan, SourceType};
 use std::ffi::OsStr;
 use walkdir::WalkDir;
+
+fn resolve_import_path(specifier: &str) {
+    println!("IMPORT:{}", specifier);
+
+    let options = ResolveOptions {
+        extensions: vec![".js".into()],
+        extension_alias: vec![(".js".into(), vec![".ts".into(), ".js".into()])],
+        condition_names: vec!["node".into(), "import".into(), "require".into()],
+        ..ResolveOptions::default()
+    };
+
+    match Resolver::new(options).resolve(
+        "/home/snket143/Remote/personal/bumblebee/test-dir",
+        specifier,
+    ) {
+        Err(error) => println!("Error: {error}"),
+        Ok(resolution) => println!("Resolved: {:?}", resolution.full_path()),
+    }
+}
+
+fn debug_require(node: &AstNode, _semantic: &Semantic) -> Option<String> {
+    let vd = node.kind().as_variable_declarator();
+    let mut specifier = None;
+
+    if let Some(vd) = vd {
+        if let Some(Expression::CallExpression(exp)) = &vd.init {
+            if exp.callee_name().unwrap() == "require" {
+                // we assume that require will always have exactly 1 arguemnt
+                if let Argument::StringLiteral(sl) = &exp.arguments[0] {
+                    specifier = Some(sl.value);
+                }
+            }
+        }
+    }
+
+    if let Some(specifier) = specifier {
+        resolve_import_path(specifier.into());
+        return Some(specifier.into());
+    }
+
+    None
+}
+
+fn debug_import(node: &AstNode, semantic: &Semantic) {
+    let nodes = semantic.nodes();
+    let mut answer = None;
+
+    for ancestor in nodes.ancestors(node.id()) {
+        match ancestor.kind() {
+            AstKind::Program(_) => {
+                break;
+            }
+            AstKind::ModuleDeclaration(oxc_ast::ast::ModuleDeclaration::ImportDeclaration(id)) => {
+                answer = Some(id.source.value);
+                break;
+            }
+            AstKind::VariableDeclarator(_) => {
+                if debug_require(ancestor, semantic).is_some() {
+                    break;
+                }
+            }
+            _ => {}
+        }
+    }
+
+    // I somehow also need to keep track of what symbol were there in the import
+    // or I can assume that we're finding reference of only 1 symbol at a time
+    // and so there will never be the case when we reach require or import where
+    // that symbol was not referred
+    if let Some(specifier) = answer {
+        resolve_import_path(specifier.into());
+    }
+}
 
 fn debug_ast_node(node: &AstNode, semantic: &Semantic) {
     let nodes = semantic.nodes();
@@ -91,12 +168,19 @@ async fn main() -> Result<()> {
 
             let symbol_table = semantic.symbols();
 
+            println!("{:#?}", semantic.stats());
             for id in symbol_table.symbol_ids() {
-                if symbol_table.get_name(id) == "call" {
+                // can I update the symbol ids in all files such that they refer to the
+                // correct symbol in the other file.
+                // e.g. call imported in index.js and call of factory.js should have same symbol_id
+                // that'll be too expensive I guess, too many symbols
+                println!("{:?}, {}", id, symbol_table.get_name(id));
+                if symbol_table.get_name(id) == "call" || symbol_table.get_name(id) == "a" {
                     let references = semantic.symbol_references(id);
                     let declaration = semantic.symbol_declaration(id);
 
-                    print!("DECLARATION:");
+                    // print!("DECLARATION:");
+                    debug_import(declaration, &semantic);
                     debug_ast_node(declaration, &semantic);
 
                     for reference in references {
@@ -105,6 +189,8 @@ async fn main() -> Result<()> {
                 }
             }
         }
+
+        println!("===============================================");
     }
 
     Ok(())

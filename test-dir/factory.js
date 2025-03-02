@@ -8,4 +8,5 @@ const factory = {
 export const call = () => {
   factory.test({ id: 1 });
 };
+
 const test_symbol_root = 0;
