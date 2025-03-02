@@ -1,7 +1,7 @@
 use anyhow::Result;
 use oxc_allocator::Allocator;
 use oxc_ast::{
-    ast::{Argument, CallExpression, Expression, StringLiteral},
+    ast::{Argument, Expression},
     AstKind,
 };
 use oxc_parser::{Parser, ParserReturn};
@@ -30,7 +30,7 @@ fn resolve_import_path(specifier: &str) {
     }
 }
 
-fn debug_require(node: &AstNode, _semantic: &Semantic) -> Option<String> {
+fn debug_require(node: &AstNode, semantic: &Semantic) -> Option<String> {
     let vd = node.kind().as_variable_declarator();
     let mut specifier = None;
 
@@ -42,6 +42,22 @@ fn debug_require(node: &AstNode, _semantic: &Semantic) -> Option<String> {
                     specifier = Some(sl.value);
                 }
             }
+        }
+
+        if specifier.is_some() {
+            println!(
+                "IDEN: {:#?}",
+                vd.id.get_binding_identifiers()[0].symbol_id()
+            );
+
+            // I forgot why I was doing this?
+            // Why do I need the node?
+            // I guess to get the sumbol_id and using that symbol_id to find further
+            // impacted areas (references)
+            let node_id = semantic
+                .symbols()
+                .get_declaration(vd.id.get_binding_identifiers()[0].symbol_id());
+            println!("{:#?}", semantic.nodes().get_node(node_id));
         }
     }
 
@@ -68,6 +84,7 @@ fn debug_import(node: &AstNode, semantic: &Semantic) {
             }
             AstKind::VariableDeclarator(_) => {
                 if debug_require(ancestor, semantic).is_some() {
+                    println!("{:#?}", ancestor);
                     break;
                 }
             }
@@ -125,6 +142,7 @@ fn debug_reference(reference: &Reference, semantic: &Semantic) {
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    // what should be the query structure
     for entry in WalkDir::new("./test-dir").into_iter().flatten() {
         if entry.path().extension() == Some(OsStr::new("js")) {
             println!("{}", entry.path().display());
@@ -168,7 +186,6 @@ async fn main() -> Result<()> {
 
             let symbol_table = semantic.symbols();
 
-            println!("{:#?}", semantic.stats());
             for id in symbol_table.symbol_ids() {
                 // can I update the symbol ids in all files such that they refer to the
                 // correct symbol in the other file.
