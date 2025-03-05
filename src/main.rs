@@ -6,15 +6,47 @@ use oxc_ast::{
 };
 use oxc_parser::{Parser, ParserReturn};
 use oxc_resolver::{ResolveOptions, Resolver};
-use oxc_semantic::{AstNode, Reference, Semantic, SemanticBuilder, SemanticBuilderReturn};
+use oxc_semantic::{
+    AstNode, Reference, Semantic, SemanticBuilder, SemanticBuilderReturn, SymbolId,
+};
 use oxc_span::{Atom, GetSpan, SourceType};
-use std::{error::Error, ffi::OsStr, fmt, path::PathBuf};
+use std::{
+    collections::{HashMap, HashSet},
+    path::Path,
+};
+use std::{ffi::OsStr, path::PathBuf};
 use walkdir::WalkDir;
 
-#[derive(Debug)]
+#[derive(Debug, Hash, PartialEq, Eq)]
 struct Query {
     symbol: String,       // e.g. call() symbol
     symbol_path: PathBuf, // from ./factory.js file
+}
+
+struct Project<'a> {
+    allocator: Allocator,
+    services: Vec<Service<'a>>,
+}
+
+impl<'a> Project<'a> {
+    pub fn new() -> Self {
+        let allocator = Allocator::default();
+
+        Project {
+            allocator,
+            services: vec![],
+        }
+    }
+    pub fn add_service(&'a mut self, root_path: &PathBuf, source_path: &PathBuf) {
+        let source_text = std::fs::read_to_string(&source_path).unwrap();
+        let source_type = SourceType::from_path(&source_path).unwrap();
+
+        let ParserReturn { program, .. } =
+            Parser::new(&self.allocator, &source_text, source_type).parse();
+        let service = Service::build(root_path.into(), source_path.to_owned(), &program).unwrap();
+
+        self.services.push(service);
+    }
 }
 
 struct Service<'a> {
@@ -38,6 +70,26 @@ impl<'a> Service<'a> {
         })
     }
 
+    /// what do we need?
+    /// nodeId, more useful
+    /// we can get node_id from symbol_id but can't go other way around I think
+    /// yes, no symbol_id from node_id
+    pub fn get_symbol_id(&self, symbol_name: &str) -> Option<SymbolId> {
+        let symbol_table = self.semantic.symbols();
+
+        let symbol_id = symbol_table
+            .symbol_ids()
+            .find(|&id| symbol_table.get_name(id) == symbol_name);
+
+        if let Some(symbol_id) = symbol_id {
+            self.semantic.symbol_declaration(symbol_id);
+        }
+
+        symbol_id
+    }
+
+    /// what should this return
+    /// should `query` be mutable?
     pub fn find_references(&self, query: &Query) {
         let symbol_table = self.semantic.symbols();
         let query_source_path =
@@ -51,7 +103,6 @@ impl<'a> Service<'a> {
         .unwrap();
 
         println!("Finding references in: {}", self.source_path.display());
-        // first look for the reference
 
         for id in symbol_table.symbol_ids() {
             if symbol_table.get_name(id) == query.symbol {
@@ -65,6 +116,8 @@ impl<'a> Service<'a> {
                     // One more check in declaration, if it's not an import but a declaration
                     // then check if the declaration file and query symbol file path is same
                     // How do I know what's the file of the declaration? source_path? I guess
+                    //
+                    // symbol_id of the declaration being calculated here
                     debug_ast_node(declaration, &self.semantic);
                 } else {
                     // Check if the declaration is an import or require statement
@@ -216,11 +269,23 @@ fn debug_reference(reference: &Reference, semantic: &Semantic) {
     }
 }
 
+// TODO: Handle symbol_is_mutated
+// Get whether a symbol is mutated (i.e. assigned to).
+// If symbol is const, always returns false. Otherwise, returns true if the symbol is assigned to somewhere in AST.
 #[tokio::main]
 async fn main() -> Result<()> {
     let root_path = "/home/snket143/Remote/personal/bumblebee/test-dir";
-    let queries = [
+
+    // first update the queries to get declaration and add their symbolId? or maybe nodeId?
+    // that'll require a service which parses and ...
+    // maybe I can have 2 lists, one just to keep track if we've visisted or not
+    // and the other to actually iterate and evaluate in the service
+    let mut query_set = HashSet::from([
         Query {
+            // I somehow want to get symbol_id here
+            // How should this queries be modified in runtime such that
+            // more impacted areas can be added as queries in it
+            // or should it be a separate mutatabl vector?
             symbol: "call".into(),
             symbol_path: PathBuf::from("./factory.js"),
         },
@@ -228,7 +293,38 @@ async fn main() -> Result<()> {
             symbol: "a".into(),
             symbol_path: PathBuf::from("./utils.js"),
         },
-    ];
+    ]);
+
+    let mut services = HashMap::new();
+    let allocator = Allocator::default();
+
+    let mut queries = query_set.iter().map(|query| {
+        let source_path = Path::new(root_path).join(&query.symbol_path);
+        let source_text = std::fs::read_to_string(&source_path).unwrap();
+        let source_type = SourceType::from_path(&source_path).unwrap();
+
+        let ParserReturn { program, .. } =
+            Parser::new(&allocator, &source_text, source_type).parse();
+
+        // I don't wanna do this
+        // This will build it twice, once here and other one when we traverse the project
+        let service = Service::build(root_path.into(), source_path.to_owned(), &program).unwrap();
+
+        // what do I do?
+        services.insert(source_path.clone(), service);
+        // TODO: Make this async
+        for query in &query_set {
+            println!(
+                "{}: {}: {:?}",
+                source_path.display(),
+                query.symbol,
+                service.get_symbol_id(&query.symbol)
+            );
+            service.find_references(query);
+        }
+    });
+
+    // let impacted_declarations = HashSet::new();
 
     // what should be the query structure
     // we'll see if there's any git diff parser, or a patch parser
@@ -245,7 +341,13 @@ async fn main() -> Result<()> {
             let service = Service::build(root_path.into(), source_path.to_owned(), &program)?;
 
             // TODO: Make this async
-            for query in &queries {
+            for query in &query_set {
+                println!(
+                    "{}: {}: {:?}",
+                    source_path.display(),
+                    query.symbol,
+                    service.get_symbol_id(&query.symbol)
+                );
                 service.find_references(query);
             }
         }
