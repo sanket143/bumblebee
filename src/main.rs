@@ -1,20 +1,43 @@
 use anyhow::Result;
+use core::hash::Hash;
 use oxc_allocator::Allocator;
 use oxc_ast::{
-    ast::{Argument, Expression, Program},
+    ast::{Argument, Expression},
     AstKind,
 };
 use oxc_parser::{Parser, ParserReturn};
 use oxc_resolver::{ResolveOptions, Resolver};
-use oxc_semantic::{AstNode, Reference, Semantic, SemanticBuilder, SemanticBuilderReturn};
+use oxc_semantic::{
+    AstNode, NodeId, Reference, Semantic, SemanticBuilder, SemanticBuilderReturn, SymbolId,
+};
 use oxc_span::{Atom, GetSpan, SourceType};
-use std::{error::Error, ffi::OsStr, fmt, path::PathBuf};
+use std::{
+    collections::{HashMap, HashSet},
+    hash::Hasher,
+    mem::ManuallyDrop,
+    path::Path,
+};
+use std::{ffi::OsStr, path::PathBuf};
 use walkdir::WalkDir;
 
-#[derive(Debug)]
+#[derive(PartialEq, Eq)]
 struct Query {
-    symbol: String,       // e.g. call() symbol
+    symbol: String, // e.g. call() symbol
+    symbol_id: Option<SymbolId>,
     symbol_path: PathBuf, // from ./factory.js file
+}
+
+impl Hash for Query {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.symbol_id.hash(state);
+        self.symbol_path.hash(state);
+    }
+}
+
+impl Query {
+    pub fn udpate_sumbol_id(&mut self, symbol_id: SymbolId) {
+        self.symbol_id = Some(symbol_id);
+    }
 }
 
 struct Service<'a> {
@@ -24,13 +47,7 @@ struct Service<'a> {
 }
 
 impl<'a> Service<'a> {
-    pub fn build(
-        root_path: PathBuf,
-        source_path: PathBuf,
-        program: &'a Program<'a>,
-    ) -> Result<Self> {
-        let SemanticBuilderReturn { semantic, .. } = SemanticBuilder::new().build(program);
-
+    pub fn build(root_path: PathBuf, source_path: PathBuf, semantic: Semantic<'a>) -> Result<Self> {
         Ok(Self {
             semantic,
             root_path,
@@ -38,7 +55,27 @@ impl<'a> Service<'a> {
         })
     }
 
-    pub fn find_references(&self, query: &Query) {
+    /// what do we need?
+    /// nodeId, more useful
+    /// we can get node_id from symbol_id but can't go other way around I think
+    /// yes, no symbol_id from node_id
+    pub fn get_symbol_id(&self, symbol_name: &str) -> Option<SymbolId> {
+        let symbol_table = self.semantic.symbols();
+
+        let symbol_id = symbol_table
+            .symbol_ids()
+            .find(|&id| symbol_table.get_name(id) == symbol_name);
+
+        if let Some(symbol_id) = symbol_id {
+            self.semantic.symbol_declaration(symbol_id);
+        }
+
+        symbol_id
+    }
+
+    /// what should this return
+    /// should `query` be mutable?
+    pub fn find_references(&self, reference_node_ids: &mut HashSet<NodeId>, query: &Query) {
         let symbol_table = self.semantic.symbols();
         let query_source_path =
             resolve_import_path(&self.root_path, query.symbol_path.to_str().unwrap()).unwrap();
@@ -51,7 +88,6 @@ impl<'a> Service<'a> {
         .unwrap();
 
         println!("Finding references in: {}", self.source_path.display());
-        // first look for the reference
 
         for id in symbol_table.symbol_ids() {
             if symbol_table.get_name(id) == query.symbol {
@@ -65,7 +101,11 @@ impl<'a> Service<'a> {
                     // One more check in declaration, if it's not an import but a declaration
                     // then check if the declaration file and query symbol file path is same
                     // How do I know what's the file of the declaration? source_path? I guess
-                    debug_ast_node(declaration, &self.semantic);
+                    //
+                    // symbol_id of the declaration being calculated here
+                    if let Some(node_id) = debug_ast_node(declaration, &self.semantic) {
+                        reference_node_ids.insert(node_id);
+                    };
                 } else {
                     // Check if the declaration is an import or require statement
                     // If it is then we need to check the source path
@@ -87,13 +127,15 @@ impl<'a> Service<'a> {
                         // mentioned in the query
                         if import_path != query_source_path {
                             continue;
-                        }
+                        } else if let Some(node_id) = debug_ast_node(declaration, &self.semantic) {
+                            reference_node_ids.insert(node_id);
+                        };
                     }
                 }
 
                 let references = self.semantic.symbol_references(id);
                 for reference in references {
-                    debug_reference(reference, &self.semantic);
+                    debug_reference(reference, &self.semantic, reference_node_ids);
                 }
             }
         }
@@ -115,7 +157,7 @@ fn resolve_import_path(root_path: &PathBuf, specifier: &str) -> Result<PathBuf> 
     Ok(full_path)
 }
 
-fn check_require<'a>(node: &'a AstNode, semantic: &'a Semantic) -> Option<Atom<'a>> {
+fn check_require<'a>(node: &'a AstNode) -> Option<Atom<'a>> {
     let vd = node.kind().as_variable_declarator();
     let mut specifier = None;
 
@@ -127,16 +169,6 @@ fn check_require<'a>(node: &'a AstNode, semantic: &'a Semantic) -> Option<Atom<'
                     specifier = Some(sl.value);
                 }
             }
-        }
-
-        if specifier.is_some() {
-            let symbol_id = vd.id.get_binding_identifiers()[0].symbol_id();
-            // I forgot why I was doing this?
-            // Why do I need the node?
-            // I guess to get the sumbol_id and using that symbol_id to find further
-            // impacted areas (references)
-            let node_id = semantic.symbols().get_declaration(symbol_id);
-            // println!("{:#?}", semantic.nodes().get_node(node_id));
         }
     }
 
@@ -157,7 +189,7 @@ fn check_import(root_path: &PathBuf, node: &AstNode, semantic: &Semantic) -> Opt
                 break;
             }
             AstKind::VariableDeclarator(_) => {
-                import_node = check_require(ancestor, semantic);
+                import_node = check_require(ancestor);
 
                 if import_node.is_some() {
                     break;
@@ -178,7 +210,7 @@ fn check_import(root_path: &PathBuf, node: &AstNode, semantic: &Semantic) -> Opt
     None
 }
 
-fn debug_ast_node(node: &AstNode, semantic: &Semantic) {
+fn debug_ast_node(node: &AstNode, semantic: &Semantic) -> Option<NodeId> {
     let nodes = semantic.nodes();
     let mut answer = None;
 
@@ -186,70 +218,151 @@ fn debug_ast_node(node: &AstNode, semantic: &Semantic) {
         match ancestor.kind() {
             AstKind::Program(_) => {}
             _ => {
-                answer = Some(ancestor);
+                answer = Some(ancestor.id());
             }
         }
     }
 
-    if let Some(answer) = answer {
-        let span = answer.span();
-        println!(
-            "[DBG_AST_NODE] {}",
-            semantic
-                .source_text()
-                .get((span.start as usize)..(span.end as usize))
-                .unwrap()
-        );
-    }
+    answer
 }
 
-fn debug_reference(reference: &Reference, semantic: &Semantic) {
+fn debug_reference(
+    reference: &Reference,
+    semantic: &Semantic,
+    reference_node_ids: &mut HashSet<NodeId>,
+) {
     let id = reference.symbol_id().unwrap();
     let references = semantic.symbol_references(id);
 
-    debug_ast_node(semantic.nodes().get_node(reference.node_id()), semantic);
+    let node_id = debug_ast_node(semantic.nodes().get_node(reference.node_id()), semantic);
+
+    if let Some(node_id) = node_id {
+        println!("{:?}", node_id);
+        reference_node_ids.insert(node_id);
+    }
 
     for refer in references {
         if refer.symbol_id() != reference.symbol_id() {
-            debug_reference(refer, semantic);
+            debug_reference(refer, semantic, reference_node_ids);
         }
     }
 }
 
-#[tokio::main]
-async fn main() -> Result<()> {
-    let root_path = "/home/snket143/Remote/personal/bumblebee/test-dir";
-    let queries = [
-        Query {
-            symbol: "call".into(),
-            symbol_path: PathBuf::from("./factory.js"),
-        },
-        Query {
-            symbol: "a".into(),
-            symbol_path: PathBuf::from("./utils.js"),
-        },
-    ];
+pub fn eval_dir(root_path: &Path) -> Result<()> {
+    // first update the queries to get declaration and add their symbolId? or maybe nodeId?
+    // that'll require a service which parses and ...
+    // maybe I can have 2 lists, one just to keep track if we've visisted or not
+    // and the other to actually iterate and evaluate in the service
+    //
+    // Allocator has been a mystery to me
+    // What are we even trying to achieve here?
+    let mut allocator = Allocator::default();
+    let mut queries = [Query {
+        symbol: "call".into(),
+        symbol_path: PathBuf::from("./factory.js"),
+        symbol_id: None,
+    }];
+    let mut query_set = HashSet::new();
+    let mut services = HashMap::new();
+
+    for query in queries.iter_mut() {
+        let source_path = root_path.join(&query.symbol_path).canonicalize().unwrap();
+
+        let source_text = std::fs::read_to_string(&source_path).unwrap();
+        let source_type = SourceType::from_path(&source_path).unwrap();
+
+        let source_text_ref = allocator.alloc_str(&source_text); // Hypothetical method
+
+        let ParserReturn { program, .. } = &**allocator.alloc(ManuallyDrop::new(
+            Parser::new(&allocator, source_text_ref, source_type).parse(),
+        ));
+
+        let SemanticBuilderReturn { semantic, .. } = SemanticBuilder::new().build(program);
+        let service = Service::build(root_path.into(), source_path.to_owned(), semantic).unwrap();
+
+        let symbol_id = service.get_symbol_id(&query.symbol);
+        if let Some(symbol_id) = symbol_id {
+            query.udpate_sumbol_id(symbol_id);
+        }
+
+        query_set.insert(query);
+        services.insert(source_path.clone(), (service, HashSet::new()));
+    }
+
+    // let impacted_declarations = HashSet::new();
 
     // what should be the query structure
     // we'll see if there's any git diff parser, or a patch parser
     // TODO: Make this async
-    for entry in WalkDir::new("./test-dir").into_iter().flatten() {
+    for entry in WalkDir::new(root_path).into_iter().flatten() {
         if entry.path().extension() == Some(OsStr::new("js")) {
-            let source_path = entry.path();
-            let source_text = std::fs::read_to_string(source_path)?;
-            let allocator = Allocator::default();
-            let source_type = SourceType::from_path(source_path)?;
+            let reference_node_ids: HashSet<NodeId> = HashSet::new();
+            let source_path = root_path.join(entry.path()).canonicalize().unwrap();
 
-            let ParserReturn { program, .. } =
-                Parser::new(&allocator, &source_text, source_type).parse();
-            let service = Service::build(root_path.into(), source_path.to_owned(), &program)?;
+            let service = match services.get_mut(&source_path) {
+                Some(service) => service,
+                None => {
+                    let source_text = std::fs::read_to_string(&source_path)?;
+                    let source_type = SourceType::from_path(&source_path)?;
+                    let source_text_ref = allocator.alloc_str(&source_text);
+
+                    let parser_return = allocator.alloc(ManuallyDrop::new(
+                        Parser::new(&allocator, source_text_ref, source_type).parse(),
+                    ));
+
+                    let SemanticBuilderReturn { semantic, .. } =
+                        SemanticBuilder::new().build(&parser_return.program);
+
+                    let service =
+                        Service::build(root_path.into(), source_path.to_owned(), semantic)?;
+
+                    services.insert(source_path.to_owned(), (service, reference_node_ids));
+
+                    services.get_mut(&source_path).unwrap()
+                }
+            };
 
             // TODO: Make this async
-            for query in &queries {
-                service.find_references(query);
+            for query in query_set.iter() {
+                service.0.find_references(&mut service.1, query);
             }
         }
     }
+    services
+        .iter()
+        .for_each(|(source_path, (service, reference_node_ids))| {
+            println!("{}: {:?}", source_path.display(), reference_node_ids);
+            reference_node_ids.iter().for_each(|node_id| {
+                let node = service.semantic.nodes().get_node(*node_id);
+                let span = node.span();
+                let text = service
+                    .semantic
+                    .source_text()
+                    .get((span.start as usize)..(span.end as usize))
+                    .unwrap();
+                println!("{}: {}", source_path.display(), text);
+            });
+        });
 
+    allocator.reset();
     Ok(())
+}
+
+// TODO: Handle symbol_is_mutated
+// Get whether a symbol is mutated (i.e. assigned to).
+// If symbol is const, always returns false. Otherwise, returns true if the symbol is assigned to somewhere in AST.
+#[tokio::main]
+async fn main() -> Result<()> {
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn main_test() {
+        let home = std::env::current_dir().unwrap();
+        assert!(eval_dir(&home.join("test-dir")).is_ok());
+    }
 }
