@@ -13,7 +13,9 @@ use oxc_semantic::{
 use oxc_span::{Atom, GetSpan, SourceType};
 use std::{
     collections::{HashMap, HashSet},
+    fs::File,
     hash::Hasher,
+    io::Write,
     mem::ManuallyDrop,
     path::Path,
 };
@@ -264,6 +266,7 @@ pub fn eval_dir(root_path: &Path) -> Result<()> {
     }];
     let mut query_set = HashSet::new();
     let mut services = HashMap::new();
+    let target_dir = Path::new("output");
 
     for query in queries.iter_mut() {
         let source_path = root_path.join(&query.symbol_path).canonicalize().unwrap();
@@ -328,20 +331,36 @@ pub fn eval_dir(root_path: &Path) -> Result<()> {
             }
         }
     }
+
+    std::fs::create_dir_all(target_dir).ok();
+
     services
         .iter()
         .for_each(|(source_path, (service, reference_node_ids))| {
-            println!("{}: {:?}", source_path.display(), reference_node_ids);
-            reference_node_ids.iter().for_each(|node_id| {
-                let node = service.semantic.nodes().get_node(*node_id);
-                let span = node.span();
-                let text = service
-                    .semantic
-                    .source_text()
-                    .get((span.start as usize)..(span.end as usize))
-                    .unwrap();
-                println!("{}: {}", source_path.display(), text);
-            });
+            if !reference_node_ids.is_empty() {
+                let mut reference_node_ids: Vec<NodeId> =
+                    reference_node_ids.iter().copied().collect();
+                reference_node_ids.sort_unstable();
+                let relative_path = source_path.strip_prefix(root_path).unwrap();
+                let target_path = target_dir.join(relative_path);
+                println!("{}: {:?}", target_path.display(), reference_node_ids);
+                let mut file_stream = File::create(&target_path).unwrap();
+
+                reference_node_ids.iter().for_each(|node_id| {
+                    let node = service.semantic.nodes().get_node(*node_id);
+                    let span = node.span();
+                    let text = service
+                        .semantic
+                        .source_text()
+                        .get((span.start as usize)..(span.end as usize))
+                        .unwrap();
+
+                    file_stream
+                        .write_all((text.to_owned() + "\n\n").as_bytes())
+                        .ok();
+                    println!("{}: {}", target_path.display(), text);
+                });
+            }
         });
 
     allocator.reset();
