@@ -62,11 +62,11 @@ impl<'a> Service<'a> {
     /// we can get node_id from symbol_id but can't go other way around I think
     /// yes, no symbol_id from node_id
     pub fn get_symbol_id(&self, symbol_name: &str) -> Option<SymbolId> {
-        let symbol_table = self.semantic.symbols();
+        let scoping = self.semantic.scoping();
 
-        let symbol_id = symbol_table
+        let symbol_id = scoping
             .symbol_ids()
-            .find(|&id| symbol_table.get_name(id) == symbol_name);
+            .find(|&id| scoping.symbol_name(id) == symbol_name);
 
         if let Some(symbol_id) = symbol_id {
             self.semantic.symbol_declaration(symbol_id);
@@ -78,7 +78,7 @@ impl<'a> Service<'a> {
     /// what should this return
     /// should `query` be mutable?
     pub fn find_references(&self, reference_node_ids: &mut HashSet<NodeId>, query: &Query) {
-        let symbol_table = self.semantic.symbols();
+        let scoping = self.semantic.scoping();
         let query_source_path =
             resolve_import_path(&self.root_path, query.symbol_path.to_str().unwrap()).unwrap();
 
@@ -91,8 +91,8 @@ impl<'a> Service<'a> {
 
         println!("Finding references in: {}", self.source_path.display());
 
-        for id in symbol_table.symbol_ids() {
-            if symbol_table.get_name(id) == query.symbol {
+        for id in scoping.symbol_ids() {
+            if scoping.symbol_name(id) == query.symbol {
                 let declaration = self.semantic.symbol_declaration(id);
 
                 if query_source_path == symbol_source_path {
@@ -302,33 +302,28 @@ pub fn eval_dir(root_path: &Path) -> Result<()> {
             let reference_node_ids: HashSet<NodeId> = HashSet::new();
             let source_path = root_path.join(entry.path()).canonicalize().unwrap();
 
-            let service = match services.get_mut(&source_path) {
-                Some(service) => service,
-                None => {
-                    let source_text = std::fs::read_to_string(&source_path)?;
-                    let source_type = SourceType::from_path(&source_path)?;
-                    let source_text_ref = allocator.alloc_str(&source_text);
+            if services.get_mut(&source_path).is_none() {
+                let source_text = std::fs::read_to_string(&source_path)?;
+                let source_type = SourceType::from_path(&source_path)?;
+                let source_text_ref = allocator.alloc_str(&source_text);
 
-                    let parser_return = allocator.alloc(ManuallyDrop::new(
-                        Parser::new(&allocator, source_text_ref, source_type).parse(),
-                    ));
+                let parser_return = allocator.alloc(ManuallyDrop::new(
+                    Parser::new(&allocator, source_text_ref, source_type).parse(),
+                ));
 
-                    let SemanticBuilderReturn { semantic, .. } =
-                        SemanticBuilder::new().build(&parser_return.program);
+                let SemanticBuilderReturn { semantic, .. } =
+                    SemanticBuilder::new().build(&parser_return.program);
 
-                    let service =
-                        Service::build(root_path.into(), source_path.to_owned(), semantic)?;
+                let service = Service::build(root_path.into(), source_path.to_owned(), semantic)?;
 
-                    services.insert(source_path.to_owned(), (service, reference_node_ids));
-
-                    services.get_mut(&source_path).unwrap()
-                }
-            };
-
-            // TODO: Make this async
-            for query in query_set.iter() {
-                service.0.find_references(&mut service.1, query);
+                services.insert(source_path.to_owned(), (service, reference_node_ids));
             }
+        }
+    }
+
+    for query in query_set.iter() {
+        for (_source_path, service) in services.iter_mut() {
+            service.0.find_references(&mut service.1, query);
         }
     }
 
@@ -343,7 +338,7 @@ pub fn eval_dir(root_path: &Path) -> Result<()> {
                 reference_node_ids.sort_unstable();
                 let relative_path = source_path.strip_prefix(root_path).unwrap();
                 let target_path = target_dir.join(relative_path);
-                println!("{}: {:?}", target_path.display(), reference_node_ids);
+                // println!("{}: {:?}", target_path.display(), reference_node_ids);
                 let mut file_stream = File::create(&target_path).unwrap();
 
                 reference_node_ids.iter().for_each(|node_id| {
@@ -358,7 +353,7 @@ pub fn eval_dir(root_path: &Path) -> Result<()> {
                     file_stream
                         .write_all((text.to_owned() + "\n\n").as_bytes())
                         .ok();
-                    println!("{}: {}", target_path.display(), text);
+                    // println!("{}: {}", target_path.display(), text);
                 });
             }
         });
