@@ -2,7 +2,10 @@ use anyhow::Result;
 use core::hash::Hash;
 use oxc_allocator::Allocator;
 use oxc_ast::{
-    ast::{Argument, Expression},
+    ast::{
+        Argument, ArrayPattern, BindingPattern, BindingPatternKind, Expression, ObjectPattern,
+        VariableDeclarator,
+    },
     AstKind,
 };
 use oxc_parser::{Parser, ParserReturn};
@@ -37,7 +40,15 @@ impl Hash for Query {
 }
 
 impl Query {
-    pub fn udpate_sumbol_id(&mut self, symbol_id: SymbolId) {
+    pub fn new(symbol_id: SymbolId, symbol_path: PathBuf) -> Self {
+        Self {
+            symbol: "<anon>".into(),
+            symbol_id: Some(symbol_id),
+            symbol_path,
+        }
+    }
+
+    pub fn udpate_symbol_id(&mut self, symbol_id: SymbolId) {
         self.symbol_id = Some(symbol_id);
     }
 }
@@ -105,7 +116,8 @@ impl<'a> Service<'a> {
                     // How do I know what's the file of the declaration? source_path? I guess
                     //
                     // symbol_id of the declaration being calculated here
-                    if let Some(node_id) = debug_ast_node(declaration, &self.semantic) {
+                    if let (Some(node_id), symbol_ids) = debug_ast_node(declaration, &self.semantic)
+                    {
                         reference_node_ids.insert(node_id);
                     };
                 } else {
@@ -129,7 +141,9 @@ impl<'a> Service<'a> {
                         // mentioned in the query
                         if import_path != query_source_path {
                             continue;
-                        } else if let Some(node_id) = debug_ast_node(declaration, &self.semantic) {
+                        } else if let (Some(node_id), _) =
+                            debug_ast_node(declaration, &self.semantic)
+                        {
                             reference_node_ids.insert(node_id);
                         };
                     }
@@ -212,18 +226,83 @@ fn check_import(root_path: &PathBuf, node: &AstNode, semantic: &Semantic) -> Opt
     None
 }
 
-fn debug_ast_node(node: &AstNode, semantic: &Semantic) -> Option<NodeId> {
+fn get_symbol_ids_from_binding_pattern(
+    binding_pattern: &BindingPattern,
+    symbol_ids: &mut Vec<SymbolId>,
+) {
+    match &binding_pattern.kind {
+        BindingPatternKind::BindingIdentifier(binding_indentifier) => {
+            symbol_ids.push(binding_indentifier.symbol_id());
+        }
+        BindingPatternKind::ObjectPattern(object_pattern) => {
+            get_symbol_ids_from_object_pattern(object_pattern, symbol_ids)
+        }
+        BindingPatternKind::ArrayPattern(array_pattern) => {
+            get_symbol_ids_from_array_pattern(array_pattern, symbol_ids)
+        }
+        BindingPatternKind::AssignmentPattern(_) => {}
+    }
+}
+
+fn get_symbol_ids_from_array_pattern(array_pattern: &ArrayPattern, symbol_ids: &mut Vec<SymbolId>) {
+    for element in array_pattern.elements.iter().flatten() {
+        get_symbol_ids_from_binding_pattern(element, symbol_ids);
+    }
+}
+
+fn get_symbol_ids_from_object_pattern(
+    object_pattern: &ObjectPattern,
+    symbol_ids: &mut Vec<SymbolId>,
+) {
+    for prop in object_pattern.properties.iter() {
+        get_symbol_ids_from_binding_pattern(&prop.value, symbol_ids);
+    }
+}
+
+fn get_symbol_ids_from_variable_declarator(
+    node: &VariableDeclarator,
+    symbol_ids: &mut Vec<SymbolId>,
+) {
+    get_symbol_ids_from_binding_pattern(&node.id, symbol_ids);
+}
+
+fn debug_ast_node<'a>(node: &AstNode, semantic: &'a Semantic) -> (Option<NodeId>, Vec<SymbolId>) {
     let nodes = semantic.nodes();
-    let mut answer = None;
+    let mut answer = (None, Vec::new());
 
     for ancestor in nodes.ancestors(node.id()) {
         match ancestor.kind() {
             AstKind::Program(_) => {}
+            AstKind::Function(func) => {
+                if let Some(id) = &func.id {
+                    answer.1.push(id.symbol_id());
+                }
+                answer.0 = Some(ancestor.id());
+            }
+            AstKind::VariableDeclarator(vd) => {
+                get_symbol_ids_from_variable_declarator(vd, &mut answer.1);
+                // Recursively parse until we get list of binding identifiers
+                // BindingPatternKind
+                // - Identifier
+                // - Object
+                //   - properties
+                //     - [BindingProperty]
+                //       - value = BindingPattern
+                // - Array
+                // - Assignment
+                // answer.1 = vd.id.kind.get_identifier_name();
+                answer.0 = Some(ancestor.id());
+            }
             _ => {
-                answer = Some(ancestor.id());
+                answer.0 = Some(ancestor.id());
             }
         }
     }
+
+    answer.1.iter().for_each(|x| {
+        let symbol_name = semantic.scoping().symbol_name(*x);
+        println!("SymbolName: {}", symbol_name);
+    });
 
     answer
 }
@@ -236,7 +315,7 @@ fn debug_reference(
     let id = reference.symbol_id().unwrap();
     let references = semantic.symbol_references(id);
 
-    let node_id = debug_ast_node(semantic.nodes().get_node(reference.node_id()), semantic);
+    let (node_id, _) = debug_ast_node(semantic.nodes().get_node(reference.node_id()), semantic);
 
     if let Some(node_id) = node_id {
         println!("{:?}", node_id);
@@ -285,7 +364,7 @@ pub fn eval_dir(root_path: &Path) -> Result<()> {
 
         let symbol_id = service.get_symbol_id(&query.symbol);
         if let Some(symbol_id) = symbol_id {
-            query.udpate_sumbol_id(symbol_id);
+            query.udpate_symbol_id(symbol_id);
         }
 
         query_set.insert(query);

@@ -1,7 +1,7 @@
 // test imports manually
 import { call } from "./factory.js";
 
-const functionFactory = {
+const { mainFunction } = {
   mainFunction: () => {
     call();
   },
@@ -20,6 +20,11 @@ const main = () => {
     console.log(fn());
   });
 };
+
+function foo() {
+  // inside foo
+  main();
+}
 
 (() => {
   // what will be this function
