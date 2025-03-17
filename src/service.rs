@@ -165,21 +165,20 @@ fn debug_ast_node(node: &AstNode, semantic: &Semantic) -> (Option<NodeId>, Vec<S
 fn debug_reference(
     reference: &Reference,
     semantic: &Semantic,
-    reference_node_ids: &mut HashSet<NodeId>,
+    reference_symbol_ids: &mut HashSet<SymbolId>,
 ) {
     let id = reference.symbol_id().unwrap();
     let references = semantic.symbol_references(id);
 
-    let (node_id, _) = debug_ast_node(semantic.nodes().get_node(reference.node_id()), semantic);
+    let (_node_id, symbol_ids) =
+        debug_ast_node(semantic.nodes().get_node(reference.node_id()), semantic);
 
-    if let Some(node_id) = node_id {
-        println!("{:?}", node_id);
-        reference_node_ids.insert(node_id);
-    }
+    println!("symbol_ids: {:?}", symbol_ids);
+    reference_symbol_ids.extend(symbol_ids);
 
     for refer in references {
         if refer.symbol_id() != reference.symbol_id() {
-            debug_reference(refer, semantic, reference_node_ids);
+            debug_reference(refer, semantic, reference_symbol_ids);
         }
     }
 }
@@ -223,7 +222,7 @@ impl<'a> Service<'a> {
 
     /// what should this return
     /// should `query` be mutable?
-    pub fn find_references(&self, reference_node_ids: &mut HashSet<NodeId>, query: &Query) {
+    pub fn find_references(&self, reference_symbol_ids: &mut HashSet<SymbolId>, query: &Query) {
         let scoping = self.semantic.scoping();
         let query_source_path =
             resolve_import_path(&self.root_path, query.symbol_path().to_str().unwrap()).unwrap();
@@ -251,10 +250,10 @@ impl<'a> Service<'a> {
                     // How do I know what's the file of the declaration? source_path? I guess
                     //
                     // symbol_id of the declaration being calculated here
-                    if let (Some(node_id), _symbol_ids) =
+                    if let (Some(_node_id), symbol_ids) =
                         debug_ast_node(declaration, &self.semantic)
                     {
-                        reference_node_ids.insert(node_id);
+                        reference_symbol_ids.extend(symbol_ids);
                     };
                 } else {
                     // Check if the declaration is an import or require statement
@@ -277,17 +276,17 @@ impl<'a> Service<'a> {
                         // mentioned in the query
                         if import_path != query_source_path {
                             continue;
-                        } else if let (Some(node_id), _) =
+                        } else if let (Some(_node_id), symbol_ids) =
                             debug_ast_node(declaration, &self.semantic)
                         {
-                            reference_node_ids.insert(node_id);
+                            reference_symbol_ids.extend(symbol_ids);
                         };
                     }
                 }
 
                 let references = self.semantic.symbol_references(id);
                 for reference in references {
-                    debug_reference(reference, &self.semantic, reference_node_ids);
+                    debug_reference(reference, &self.semantic, reference_symbol_ids);
                 }
             }
         }

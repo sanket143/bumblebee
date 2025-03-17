@@ -4,7 +4,7 @@ use std::{
     path::PathBuf,
 };
 
-#[derive(PartialEq, Eq)]
+#[derive(PartialEq, Eq, Clone, Debug)]
 pub struct Query {
     symbol: String, // e.g. call() symbol
     symbol_id: Option<SymbolId>,
@@ -39,10 +39,6 @@ impl Query {
             symbol_id: None,
             symbol_path,
         }
-    }
-
-    pub fn udpate_symbol_id(&mut self, symbol_id: SymbolId) {
-        self.symbol_id = Some(symbol_id);
     }
 
     pub fn symbol_path(&self) -> &PathBuf {
