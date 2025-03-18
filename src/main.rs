@@ -4,10 +4,10 @@ mod service;
 use anyhow::Result;
 use oxc_allocator::Allocator;
 use oxc_parser::{Parser, ParserReturn};
-use oxc_semantic::{SemanticBuilder, SemanticBuilderReturn, SymbolId};
+use oxc_semantic::{NodeId, SemanticBuilder, SemanticBuilderReturn, SymbolId};
 use oxc_span::{GetSpan, SourceType};
 use query::Query;
-use service::Service;
+use service::{Service, ServiceReference};
 use std::{
     collections::{HashMap, HashSet},
     fs::File,
@@ -17,25 +17,6 @@ use std::{
 };
 use std::{ffi::OsStr, path::PathBuf};
 use walkdir::WalkDir;
-
-struct ServiceReference<'a> {
-    service: &'a Service<'a>,
-    reference_symbol_ids: &'a mut HashSet<SymbolId>,
-}
-
-impl<'a> ServiceReference<'a> {
-    pub fn new(service: &'a Service<'a>, reference_symbol_ids: &'a mut HashSet<SymbolId>) -> Self {
-        Self {
-            service,
-            reference_symbol_ids,
-        }
-    }
-
-    pub fn find_references(&mut self, query: &Query) {
-        self.service
-            .find_references(self.reference_symbol_ids, query);
-    }
-}
 
 struct Bumblebee<'a> {
     root_path: &'a Path,
@@ -74,11 +55,12 @@ impl<'a> Bumblebee<'a> {
         let service = &**self.allocator.alloc(ManuallyDrop::new(
             Service::build(self.root_path.into(), source_path.to_owned(), semantic).unwrap(),
         ));
+        let reference_node_ids = &mut **self.allocator.alloc(ManuallyDrop::new(HashSet::new()));
         let reference_symbol_ids = &mut **self.allocator.alloc(ManuallyDrop::new(HashSet::new()));
         let symbol_id = service.get_symbol_id(query.symbol());
 
         if let Some(symbol_id) = symbol_id {
-            let symbol_name = service.get_semantic().scoping().symbol_name(symbol_id);
+            let symbol_name = service.semantic().scoping().symbol_name(symbol_id);
 
             self.queries.insert(Query::new(
                 symbol_id,
@@ -92,6 +74,7 @@ impl<'a> Bumblebee<'a> {
                 .allocator
                 .alloc(ManuallyDrop::new(ServiceReference::new(
                     service,
+                    reference_node_ids,
                     reference_symbol_ids,
                 )));
 
@@ -101,6 +84,8 @@ impl<'a> Bumblebee<'a> {
     pub fn update_services(&mut self) -> Result<()> {
         for entry in WalkDir::new(self.root_path).into_iter().flatten() {
             if entry.path().extension() == Some(OsStr::new("js")) {
+                let reference_node_ids =
+                    &mut **self.allocator.alloc(ManuallyDrop::new(HashSet::new()));
                 let reference_symbol_ids =
                     &mut **self.allocator.alloc(ManuallyDrop::new(HashSet::new()));
                 let source_path = self.root_path.join(entry.path()).canonicalize().unwrap();
@@ -128,6 +113,7 @@ impl<'a> Bumblebee<'a> {
                             .allocator
                             .alloc(ManuallyDrop::new(ServiceReference::new(
                                 service,
+                                reference_node_ids,
                                 reference_symbol_ids,
                             )));
 
@@ -147,13 +133,13 @@ impl<'a> Bumblebee<'a> {
 
                 println!(
                     "service_reference: {:#?}",
-                    service_reference.reference_symbol_ids
+                    service_reference.reference_symbol_ids()
                 );
             }
         }
     }
 
-    pub fn dump_reference_files(&self) {
+    pub fn dump_reference_files(&'a self) {
         std::fs::create_dir_all(self.target_dir).ok();
 
         self.services
@@ -162,34 +148,29 @@ impl<'a> Bumblebee<'a> {
                 println!(
                     "{}: {:?}",
                     source_path.display(),
-                    service_reference.reference_symbol_ids
+                    service_reference.reference_node_ids()
                 );
-                if !service_reference.reference_symbol_ids.is_empty() {
-                    let mut reference_symbol_ids: Vec<SymbolId> = service_reference
-                        .reference_symbol_ids
+                if !service_reference.reference_node_ids().is_empty() {
+                    let mut reference_node_ids: Vec<NodeId> = service_reference
+                        .reference_node_ids()
                         .iter()
                         .copied()
                         .collect();
-                    reference_symbol_ids.sort_unstable();
+                    reference_node_ids.sort_unstable();
                     let relative_path = source_path.strip_prefix(self.root_path).unwrap();
                     let target_path = self.target_dir.join(relative_path);
                     let mut file_stream = File::create(&target_path).unwrap();
 
-                    reference_symbol_ids.iter().for_each(|symbol_id| {
-                        let node_id = service_reference
-                            .service
-                            .get_semantic()
-                            .scoping()
-                            .symbol_declaration(*symbol_id);
+                    reference_node_ids.iter().for_each(|node_id| {
                         let node = service_reference
-                            .service
-                            .get_semantic()
+                            .service()
+                            .semantic()
                             .nodes()
-                            .get_node(node_id);
+                            .get_node(*node_id);
                         let span = node.span();
                         let text = service_reference
-                            .service
-                            .get_semantic()
+                            .service()
+                            .semantic()
                             .source_text()
                             .get((span.start as usize)..(span.end as usize))
                             .unwrap();

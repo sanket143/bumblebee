@@ -173,10 +173,171 @@ fn debug_reference(
     }
 }
 
+pub struct ServiceReference<'a> {
+    service: &'a Service<'a>,
+    reference_node_ids: &'a mut HashSet<NodeId>,
+    reference_symbol_ids: &'a mut HashSet<SymbolId>,
+}
+
+impl<'a> ServiceReference<'a> {
+    pub fn new(
+        service: &'a Service<'a>,
+        reference_node_ids: &'a mut HashSet<NodeId>,
+        reference_symbol_ids: &'a mut HashSet<SymbolId>,
+    ) -> Self {
+        Self {
+            service,
+            reference_node_ids,
+            reference_symbol_ids,
+        }
+    }
+
+    pub fn find_references(&mut self, query: &Query) {
+        let scoping = self.service.semantic().scoping();
+        let query_source_path = resolve_import_path(
+            &self.service.root_path,
+            query.symbol_path().to_str().unwrap(),
+        )
+        .unwrap();
+
+        let symbol_source_path = resolve_import_path(
+            &self.service.root_path.join(".."),
+            self.service.source_path.to_str().unwrap(),
+        )
+        .unwrap();
+
+        println!(
+            "Finding references in: {}",
+            self.service.source_path.display()
+        );
+        println!("Query: {:?}", query);
+
+        for id in scoping.symbol_ids() {
+            if scoping.symbol_name(id) == query.symbol() {
+                let declaration = self.service.semantic().symbol_declaration(id);
+
+                if query_source_path == symbol_source_path {
+                    // can we store all of these as symbolIds? and dump the declaration of all of these
+                    // in the file in the end?
+                    // it'll also be easier to maintain the unique symbolIds that way.
+                    //
+                    // One more check in declaration, if it's not an import but a declaration
+                    // then check if the declaration file and query symbol file path is same
+                    // How do I know what's the file of the declaration? source_path? I guess
+                    //
+                    // symbol_id of the declaration being calculated here
+                    if let (Some(node_id), symbol_ids) =
+                        debug_ast_node(declaration, self.service.semantic())
+                    {
+                        self.reference_node_ids.insert(node_id);
+                        self.reference_symbol_ids.extend(symbol_ids);
+                    };
+                } else {
+                    // Check if the declaration is an import or require statement
+                    // If it is then we need to check the source path
+                    // If that's the same as the query or not
+                    //
+                    // How do I know if the declaration is an import?
+                    let import_path =
+                        check_import(&self.service.root_path, declaration, &self.service.semantic);
+
+                    if let Some(import_path) = import_path {
+                        let import_path = self.service.root_path.join(import_path);
+                        let query_source_path = resolve_import_path(
+                            &self.service.root_path,
+                            query.symbol_path().to_str().unwrap(),
+                        )
+                        .unwrap();
+
+                        // there could be symbols with same name in multiple files
+                        // verify if the query symbol is of same imported from same file as
+                        // mentioned in the query
+                        if import_path != query_source_path {
+                            continue;
+                        } else if let (Some(node_id), symbol_ids) =
+                            debug_ast_node(declaration, &self.service.semantic)
+                        {
+                            self.reference_node_ids.insert(node_id);
+                            self.reference_symbol_ids.extend(symbol_ids);
+                        };
+                    }
+                }
+
+                let references = self.service.semantic.symbol_references(id);
+                for reference in references {
+                    self.add_reference_node_ids(reference);
+                }
+            }
+        }
+    }
+
+    fn add_reference_node_ids(&mut self, reference: &Reference) {
+        let id = reference.symbol_id().unwrap();
+        let semantic = &self.service.semantic;
+        let references = semantic.symbol_references(id);
+
+        let (node_id, symbol_ids) =
+            self.add_reference_symbol_and_node_ids(semantic.nodes().get_node(reference.node_id()));
+
+        self.reference_node_ids.extend(node_id);
+        self.reference_symbol_ids.extend(symbol_ids);
+
+        for refer in references {
+            if refer.symbol_id() != reference.symbol_id() {
+                self.add_reference_node_ids(refer);
+            }
+        }
+    }
+
+    fn add_reference_symbol_and_node_ids(&self, node: &AstNode) -> (Option<NodeId>, Vec<SymbolId>) {
+        let semantic = self.service.semantic();
+        let nodes = semantic.nodes();
+        let mut answer = (None, Vec::new());
+
+        for ancestor in nodes.ancestors(node.id()) {
+            match ancestor.kind() {
+                AstKind::Program(_) => {}
+                AstKind::Function(func) => {
+                    if let Some(id) = &func.id {
+                        answer.1.push(id.symbol_id());
+                    }
+                    answer.0 = Some(ancestor.id());
+                }
+                AstKind::VariableDeclarator(vd) => {
+                    get_symbol_ids_from_variable_declarator(vd, &mut answer.1);
+                    answer.0 = Some(ancestor.id());
+                }
+                _ => {
+                    answer.0 = Some(ancestor.id());
+                }
+            }
+        }
+
+        answer.1.iter().for_each(|x| {
+            let symbol_name = semantic.scoping().symbol_name(*x);
+            println!("SymbolName: {}", symbol_name);
+        });
+
+        answer
+    }
+
+    pub fn reference_symbol_ids(&self) -> &HashSet<SymbolId> {
+        self.reference_symbol_ids
+    }
+
+    pub fn reference_node_ids(&self) -> &HashSet<NodeId> {
+        self.reference_node_ids
+    }
+
+    pub fn service(&'a self) -> &'a Service<'a> {
+        self.service
+    }
+}
+
 pub struct Service<'a> {
     semantic: Semantic<'a>,
-    root_path: PathBuf,
-    source_path: PathBuf,
+    pub root_path: PathBuf,
+    pub source_path: PathBuf,
 }
 
 impl<'a> Service<'a> {
@@ -188,7 +349,7 @@ impl<'a> Service<'a> {
         })
     }
 
-    pub fn get_semantic(&'a self) -> &'a Semantic<'a> {
+    pub fn semantic(&'a self) -> &'a Semantic<'a> {
         &self.semantic
     }
 
