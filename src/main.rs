@@ -78,8 +78,13 @@ impl<'a> Bumblebee<'a> {
         let symbol_id = service.get_symbol_id(query.symbol());
 
         if let Some(symbol_id) = symbol_id {
-            self.queries
-                .insert(Query::new(symbol_id, query.symbol_path().to_path_buf()));
+            let symbol_name = service.get_semantic().scoping().symbol_name(symbol_id);
+
+            self.queries.insert(Query::new(
+                symbol_id,
+                symbol_name.into(),
+                query.symbol_path().to_path_buf(),
+            ));
         }
 
         let service_reference =
@@ -139,6 +144,11 @@ impl<'a> Bumblebee<'a> {
         for query in self.queries.iter() {
             for (_, service_reference) in self.services.iter_mut() {
                 (*service_reference).find_references(query);
+
+                println!(
+                    "service_reference: {:#?}",
+                    service_reference.reference_symbol_ids
+                );
             }
         }
     }

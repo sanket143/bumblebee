@@ -25,9 +25,9 @@ impl Hash for Query {
 
 impl Query {
     #[allow(dead_code)]
-    pub fn new(symbol_id: SymbolId, symbol_path: PathBuf) -> Self {
+    pub fn new(symbol_id: SymbolId, symbol_name: String, symbol_path: PathBuf) -> Self {
         Self {
-            symbol: "<anon>".into(),
+            symbol: symbol_name,
             symbol_id: Some(symbol_id),
             symbol_path,
         }
@@ -47,5 +47,9 @@ impl Query {
 
     pub fn symbol(&self) -> &String {
         &self.symbol
+    }
+
+    pub fn symbol_id(&self) -> Option<SymbolId> {
+        self.symbol_id
     }
 }

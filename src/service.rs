@@ -136,16 +136,6 @@ fn debug_ast_node(node: &AstNode, semantic: &Semantic) -> (Option<NodeId>, Vec<S
             }
             AstKind::VariableDeclarator(vd) => {
                 get_symbol_ids_from_variable_declarator(vd, &mut answer.1);
-                // Recursively parse until we get list of binding identifiers
-                // BindingPatternKind
-                // - Identifier
-                // - Object
-                //   - properties
-                //     - [BindingProperty]
-                //       - value = BindingPattern
-                // - Array
-                // - Assignment
-                // answer.1 = vd.id.kind.get_identifier_name();
                 answer.0 = Some(ancestor.id());
             }
             _ => {
@@ -220,8 +210,6 @@ impl<'a> Service<'a> {
         symbol_id
     }
 
-    /// what should this return
-    /// should `query` be mutable?
     pub fn find_references(&self, reference_symbol_ids: &mut HashSet<SymbolId>, query: &Query) {
         let scoping = self.semantic.scoping();
         let query_source_path =
@@ -235,6 +223,7 @@ impl<'a> Service<'a> {
         .unwrap();
 
         println!("Finding references in: {}", self.source_path.display());
+        println!("Query: {:?}", query);
 
         for id in scoping.symbol_ids() {
             if scoping.symbol_name(id) == query.symbol() {
