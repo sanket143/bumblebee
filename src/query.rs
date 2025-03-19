@@ -48,8 +48,4 @@ impl Query {
     pub fn symbol(&self) -> &String {
         &self.symbol
     }
-
-    pub fn symbol_id(&self) -> Option<SymbolId> {
-        self.symbol_id
-    }
 }

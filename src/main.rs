@@ -4,7 +4,7 @@ mod service;
 use anyhow::Result;
 use oxc_allocator::Allocator;
 use oxc_parser::{Parser, ParserReturn};
-use oxc_semantic::{NodeId, SemanticBuilder, SemanticBuilderReturn, SymbolId};
+use oxc_semantic::{NodeId, SemanticBuilder, SemanticBuilderReturn};
 use oxc_span::{GetSpan, SourceType};
 use query::Query;
 use service::{Service, ServiceReference};
@@ -127,15 +127,50 @@ impl<'a> Bumblebee<'a> {
     }
 
     pub fn find_references_recursively(&mut self) {
-        for query in self.queries.iter() {
-            for (_, service_reference) in self.services.iter_mut() {
-                (*service_reference).find_references(query);
+        let mut queries: Vec<Query> = self.queries.iter().cloned().collect();
+        let queries_original_len = queries.len();
+        let mut queries_len = queries_original_len;
+        let mut i = 0;
 
-                println!(
-                    "service_reference: {:#?}",
-                    service_reference.reference_symbol_ids()
-                );
+        while i < queries_len {
+            println!("{}", queries.len());
+
+            self.services
+                .iter_mut()
+                .map(|(source_path, service_reference)| {
+                    let scoping = service_reference.service().semantic().scoping();
+                    (source_path, service_reference, scoping)
+                })
+                .for_each(|(source_path, service_reference, scoping)| {
+                    let query = &queries[i];
+                    service_reference.find_references(query);
+
+                    let symbol_ids = service_reference.reference_symbol_ids();
+
+                    queries.extend(symbol_ids.iter().filter_map(|symbol_id| {
+                        let symbol_name = scoping.symbol_name(*symbol_id);
+                        let query = Query::new(
+                            *symbol_id,
+                            symbol_name.to_owned(),
+                            source_path.to_path_buf(),
+                        );
+
+                        if !self.queries.contains(&query) {
+                            return Some(query);
+                        }
+
+                        None
+                    }));
+                    queries_len = queries.len();
+                    println!("IN: {}", queries.len());
+                });
+
+            // TODO: make this efficient, this is a hacky way
+            if i >= queries_original_len {
+                self.queries.insert(queries[i].clone());
             }
+
+            i += 1;
         }
     }
 
@@ -178,7 +213,6 @@ impl<'a> Bumblebee<'a> {
                         file_stream
                             .write_all((text.to_owned() + "\n\n").as_bytes())
                             .ok();
-                        // println!("{}: {}", target_path.display(), text);
                     });
                 }
             });

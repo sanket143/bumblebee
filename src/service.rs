@@ -152,27 +152,6 @@ fn debug_ast_node(node: &AstNode, semantic: &Semantic) -> (Option<NodeId>, Vec<S
     answer
 }
 
-fn debug_reference(
-    reference: &Reference,
-    semantic: &Semantic,
-    reference_symbol_ids: &mut HashSet<SymbolId>,
-) {
-    let id = reference.symbol_id().unwrap();
-    let references = semantic.symbol_references(id);
-
-    let (_node_id, symbol_ids) =
-        debug_ast_node(semantic.nodes().get_node(reference.node_id()), semantic);
-
-    println!("symbol_ids: {:?}", symbol_ids);
-    reference_symbol_ids.extend(symbol_ids);
-
-    for refer in references {
-        if refer.symbol_id() != reference.symbol_id() {
-            debug_reference(refer, semantic, reference_symbol_ids);
-        }
-    }
-}
-
 pub struct ServiceReference<'a> {
     service: &'a Service<'a>,
     reference_node_ids: &'a mut HashSet<NodeId>,
@@ -329,7 +308,7 @@ impl<'a> ServiceReference<'a> {
         self.reference_node_ids
     }
 
-    pub fn service(&'a self) -> &'a Service<'a> {
+    pub fn service(&self) -> &'a Service<'a> {
         self.service
     }
 }
@@ -369,76 +348,5 @@ impl<'a> Service<'a> {
         }
 
         symbol_id
-    }
-
-    pub fn find_references(&self, reference_symbol_ids: &mut HashSet<SymbolId>, query: &Query) {
-        let scoping = self.semantic.scoping();
-        let query_source_path =
-            resolve_import_path(&self.root_path, query.symbol_path().to_str().unwrap()).unwrap();
-
-        // TODO: clean this path up
-        let symbol_source_path = resolve_import_path(
-            &self.root_path.join(".."),
-            self.source_path.to_str().unwrap(),
-        )
-        .unwrap();
-
-        println!("Finding references in: {}", self.source_path.display());
-        println!("Query: {:?}", query);
-
-        for id in scoping.symbol_ids() {
-            if scoping.symbol_name(id) == query.symbol() {
-                let declaration = self.semantic.symbol_declaration(id);
-
-                if query_source_path == symbol_source_path {
-                    // can we store all of these as symbolIds? and dump the declaration of all of these
-                    // in the file in the end?
-                    // it'll also be easier to maintain the unique symbolIds that way.
-                    //
-                    // One more check in declaration, if it's not an import but a declaration
-                    // then check if the declaration file and query symbol file path is same
-                    // How do I know what's the file of the declaration? source_path? I guess
-                    //
-                    // symbol_id of the declaration being calculated here
-                    if let (Some(_node_id), symbol_ids) =
-                        debug_ast_node(declaration, &self.semantic)
-                    {
-                        reference_symbol_ids.extend(symbol_ids);
-                    };
-                } else {
-                    // Check if the declaration is an import or require statement
-                    // If it is then we need to check the source path
-                    // If that's the same as the query or not
-                    //
-                    // How do I know if the declaration is an import?
-                    let import_path = check_import(&self.root_path, declaration, &self.semantic);
-
-                    if let Some(import_path) = import_path {
-                        let import_path = self.root_path.join(import_path);
-                        let query_source_path = resolve_import_path(
-                            &self.root_path,
-                            query.symbol_path().to_str().unwrap(),
-                        )
-                        .unwrap();
-
-                        // there could be symbols with same name in multiple files
-                        // verify if the query symbol is of same imported from same file as
-                        // mentioned in the query
-                        if import_path != query_source_path {
-                            continue;
-                        } else if let (Some(_node_id), symbol_ids) =
-                            debug_ast_node(declaration, &self.semantic)
-                        {
-                            reference_symbol_ids.extend(symbol_ids);
-                        };
-                    }
-                }
-
-                let references = self.semantic.symbol_references(id);
-                for reference in references {
-                    debug_reference(reference, &self.semantic, reference_symbol_ids);
-                }
-            }
-        }
     }
 }

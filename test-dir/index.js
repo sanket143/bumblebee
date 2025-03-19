@@ -14,7 +14,7 @@ const { mainFunction } = {
 };
 
 const main = () => {
-  call();
+  mainFunction();
 
   Object.values(functionFactory).forEach((fn) => {
     console.log(fn());
