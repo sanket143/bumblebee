@@ -2,6 +2,7 @@ mod query;
 mod service;
 
 use anyhow::Result;
+use ignore::Walk;
 use oxc_allocator::Allocator;
 use oxc_parser::{Parser, ParserReturn};
 use oxc_semantic::{NodeId, SemanticBuilder, SemanticBuilderReturn};
@@ -16,7 +17,6 @@ use std::{
     path::Path,
 };
 use std::{ffi::OsStr, path::PathBuf};
-use walkdir::WalkDir;
 
 struct Bumblebee<'a> {
     root_path: &'a Path,
@@ -82,7 +82,7 @@ impl<'a> Bumblebee<'a> {
     }
 
     pub fn update_services(&mut self) -> Result<()> {
-        for entry in WalkDir::new(self.root_path).into_iter().flatten() {
+        for entry in Walk::new(self.root_path).flatten() {
             if entry.path().extension() == Some(OsStr::new("js")) {
                 let reference_node_ids =
                     &mut **self.allocator.alloc(ManuallyDrop::new(HashSet::new()));
