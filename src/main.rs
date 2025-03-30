@@ -242,10 +242,23 @@ fn eval_dir<'a>(bumblebee: &'a mut Bumblebee<'a>) -> Result<()> {
 // If symbol is const, always returns false. Otherwise, returns true if the symbol is assigned to somewhere in AST.
 #[tokio::main]
 async fn main() -> Result<()> {
+    use clap::Parser;
+
+    #[derive(Parser)]
+    #[command(author, version, about, long_about = None)]
+    struct Args {
+        #[arg(long)]
+        project_path: String,
+
+        #[arg(long, default_value = "../output")]
+        target_path: String,
+    }
+
+    let args = Args::parse();
     let mut allocator = Allocator::default();
     let home = std::env::current_dir().unwrap();
-    let root_path = home.join("test-dir");
-    let target_dir = Path::new("output");
+    let root_path = home.join(args.project_path);
+    let target_dir = Path::new(&args.target_path);
     let mut bumblebee = Bumblebee::new(&root_path, target_dir, &mut allocator);
 
     eval_dir(&mut bumblebee)
