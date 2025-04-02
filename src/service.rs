@@ -1,3 +1,4 @@
+use crate::query::Query;
 use anyhow::Result;
 use oxc_ast::{
     ast::{
@@ -10,8 +11,6 @@ use oxc_resolver::{ResolveOptions, Resolver};
 use oxc_semantic::{AstNode, NodeId, Reference, Semantic, SymbolId};
 use oxc_span::Atom;
 use std::{collections::HashSet, path::PathBuf};
-
-use crate::query::Query;
 
 fn resolve_import_path(root_path: &PathBuf, specifier: &str) -> Result<PathBuf> {
     let options = ResolveOptions {
