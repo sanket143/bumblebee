@@ -24,7 +24,6 @@ fn resolve_import_path(root_path: &PathBuf, specifier: &str) -> Result<PathBuf> 
         None
     };
 
-    println!("{:#?}", config_path);
     let mut tsconfig_options = None;
 
     if let Some(config_path) = config_path {
