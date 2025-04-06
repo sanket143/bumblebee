@@ -1,0 +1,9 @@
+{
+  "compilerOptions": {
+    "baseUrl": ".",
+    "paths": {
+      "*": ["pkgs/*", "*"]
+    }
+  },
+  "exclude": ["node_modules", "**/node_modules/*"]
+}

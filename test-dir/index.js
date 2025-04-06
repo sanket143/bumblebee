@@ -1,9 +1,11 @@
 // test imports manually
 import { call } from "./factory.js";
+import { fellow } from "utils"
 
 const { mainFunction } = {
   mainFunction: () => {
     call();
+    fellow();
   },
   testFunction: () => {
     return new Promise((resolve, reject) => {

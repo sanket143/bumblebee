@@ -29,8 +29,8 @@ pub fn run(args: Args) -> Result<()> {
 
 fn eval_dir<'a>(bumblebee: &'a mut Bumblebee<'a>) -> Result<()> {
     let queries = [Query::new_with_symbol(
-        "call".into(),
-        PathBuf::from("./factory.js"),
+        "fellow".into(),
+        PathBuf::from("./pkgs/utils/index.js"),
     )];
 
     for query in queries {

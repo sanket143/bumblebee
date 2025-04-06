@@ -7,16 +7,38 @@ use oxc_ast::{
     },
     AstKind,
 };
+use oxc_resolver::TsconfigOptions;
 use oxc_resolver::{ResolveOptions, Resolver};
 use oxc_semantic::{AstNode, NodeId, Reference, Semantic, SymbolId};
 use oxc_span::Atom;
 use std::{collections::HashSet, path::PathBuf};
 
 fn resolve_import_path(root_path: &PathBuf, specifier: &str) -> Result<PathBuf> {
+    let tsconfig_path = root_path.join("tsconfig.json");
+    let jsconfig_path = root_path.join("jsconfig.json");
+    let config_path = if tsconfig_path.exists() {
+        Some(tsconfig_path)
+    } else if jsconfig_path.exists() {
+        Some(jsconfig_path)
+    } else {
+        None
+    };
+
+    println!("{:#?}", config_path);
+    let mut tsconfig_options = None;
+
+    if let Some(config_path) = config_path {
+        tsconfig_options = Some(TsconfigOptions {
+            config_file: config_path,
+            references: oxc_resolver::TsconfigReferences::Auto,
+        });
+    }
+
     let options = ResolveOptions {
         extensions: vec![".js".into()],
         extension_alias: vec![(".js".into(), vec![".ts".into(), ".js".into()])],
         condition_names: vec!["node".into(), "import".into(), "require".into()],
+        tsconfig: tsconfig_options,
         ..ResolveOptions::default()
     };
 

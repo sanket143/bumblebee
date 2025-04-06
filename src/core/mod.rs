@@ -28,8 +28,11 @@ pub struct Bumblebee<'a> {
 impl<'a> Bumblebee<'a> {
     /// Creates a new Bumblebee instance
     pub fn new(root_path: &'a Path, target_dir: &'a Path, allocator: &'a mut Allocator) -> Self {
+        let path_buf = root_path.canonicalize().expect("Invalid project path");
+        let path = &**allocator.alloc(ManuallyDrop::new(path_buf));
+
         Self {
-            root_path,
+            root_path: path.as_path(),
             target_dir,
             allocator,
             queries: Default::default(),
@@ -195,8 +198,11 @@ impl<'a> Bumblebee<'a> {
                         .copied()
                         .collect();
                     reference_node_ids.sort_unstable();
+                    println!("{:#?}: {:#?}", source_path, self.root_path.display());
                     let relative_path = source_path.strip_prefix(self.root_path).unwrap();
                     let target_path = self.target_dir.join(relative_path);
+                    println!("{:#?}", target_path);
+                    std::fs::create_dir_all(target_path.parent().unwrap()).ok();
                     let mut file_stream = File::create(&target_path).unwrap();
 
                     reference_node_ids.iter().for_each(|node_id| {

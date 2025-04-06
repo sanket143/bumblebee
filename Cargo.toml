@@ -5,12 +5,12 @@ edition = "2021"
 
 [dependencies]
 ignore = "0.4"
-oxc_ast = { version = "0.57" }
-oxc_allocator = { version = "0.57" }
-oxc_parser = { version = "0.57" }
-oxc_semantic = { version = "0.57" }
-oxc_span = { version = "0.57" }
-oxc_resolver = { version = "5.0" }
+oxc_ast = { version = "0.62" }
+oxc_allocator = { version = "0.62" }
+oxc_parser = { version = "0.62" }
+oxc_semantic = { version = "0.62" }
+oxc_span = { version = "0.62" }
+oxc_resolver = { version = "5.1" }
 tokio = { version = "1.44", features = ["macros", "rt-multi-thread"] }
 anyhow = "1.0"
 serde = "1.0"
