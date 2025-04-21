@@ -2,6 +2,7 @@ use crate::query::Query;
 use crate::service::Service;
 use crate::service::ServiceReference;
 use anyhow::Result;
+use dunce::realpath;
 use ignore::Walk;
 use oxc_allocator::Allocator;
 use oxc_parser::{Parser, ParserReturn};
@@ -28,7 +29,7 @@ pub struct Bumblebee<'a> {
 impl<'a> Bumblebee<'a> {
     /// Creates a new Bumblebee instance
     pub fn new(root_path: &'a Path, target_dir: &'a Path, allocator: &'a mut Allocator) -> Self {
-        let path_buf = root_path.canonicalize().expect("Invalid project path");
+        let path_buf = realpath(root_path).expect("Invalid project path");
         let path = &**allocator.alloc(ManuallyDrop::new(path_buf));
 
         Self {
@@ -42,11 +43,8 @@ impl<'a> Bumblebee<'a> {
 
     /// Evaluates a query to find references to a symbol
     pub fn evaluate_query(&mut self, query: Query) {
-        let source_path = self
-            .root_path
-            .join(query.symbol_path())
-            .canonicalize()
-            .unwrap();
+        let source_path =
+            realpath(self.root_path.join(query.symbol_path())).expect("Invalid query source path!");
         let source_text = std::fs::read_to_string(&source_path).unwrap();
         let source_type = SourceType::from_path(&source_path).unwrap();
         let source_text_ref = self.allocator.alloc_str(&source_text);
@@ -93,7 +91,8 @@ impl<'a> Bumblebee<'a> {
                     &mut **self.allocator.alloc(ManuallyDrop::new(HashSet::new()));
                 let reference_symbol_ids =
                     &mut **self.allocator.alloc(ManuallyDrop::new(HashSet::new()));
-                let source_path = self.root_path.join(entry.path()).canonicalize().unwrap();
+                let source_path =
+                    realpath(self.root_path.join(entry.path())).expect("Invalid source path!");
 
                 if self.services.get_mut(&source_path).is_none() {
                     let source_text = std::fs::read_to_string(&source_path)?;
@@ -138,9 +137,8 @@ impl<'a> Bumblebee<'a> {
         let mut queries_len = queries_original_len;
         let mut i = 0;
 
+        // Using a while loop instead of iterator to handle the dynamic growth of queries
         while i < queries_len {
-            println!("{}", queries.len());
-
             self.services
                 .iter_mut()
                 .map(|(source_path, service_reference)| {
