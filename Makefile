@@ -12,3 +12,6 @@ js:
 
 test:
 	cargo test -- --nocapture
+
+install:
+	cargo install --path .
